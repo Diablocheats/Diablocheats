@@ -1,10 +1,9 @@
--- Auto Clicker для Roblox (Lua) с полноценным функционалом
+-- Auto Clicker для Roblox (Lua) - ИСПРАВЛЕННАЯ ВЕРСИЯ С КЛИКАМИ
 -- Вставьте в Executor (Synapse X, Krnl, Script-Ware, etc.)
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
@@ -26,25 +25,63 @@ local settings = {
 local isRunning = false
 local clickCount = 0
 local clickTimer = nil
-local isDragging = false
-local dragStart = nil
-local dragOffset = nil
+local isMinimized = false
 
--- === СОЗДАНИЕ GUI ===
+-- === ФУНКЦИЯ КЛИКА (РАБОЧАЯ) ===
+local function doClick(x, y, button)
+    -- Метод 1: Через mouseclick (работает в большинстве экзекьюторов)
+    if mouseclick then
+        if button == "Left" then
+            mouseclick(x, y)
+        elseif button == "Right" then
+            mouseclick(x, y, 2)
+        elseif button == "Middle" then
+            mouseclick(x, y, 3)
+        end
+        return true
+    end
+    
+    -- Метод 2: Через VirtualInputManager
+    local success, err = pcall(function()
+        local btn = Enum.UserInputType.MouseButton1
+        if button == "Right" then
+            btn = Enum.UserInputType.MouseButton2
+        elseif button == "Middle" then
+            btn = Enum.UserInputType.MouseButton3
+        end
+        
+        local VirtualInputManager = game:GetService("VirtualInputManager")
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, btn, 0)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, btn, 0)
+    end)
+    
+    if success then return true end
+    
+    -- Метод 3: Через мос (для старых экзекьюторов)
+    if mousemove and mouseclick then
+        mousemove(x, y)
+        task.wait(0.02)
+        if button == "Left" then
+            mouseclick(1)
+        elseif button == "Right" then
+            mouseclick(2)
+        elseif button == "Middle" then
+            mouseclick(3)
+        end
+        return true
+    end
+    
+    return false
+end
+
+-- === СОЗДАНИЕ GUI (БЕЗ ФОНА) ===
 local screenGui = Instance.new("ScreenGui")
 screenGui.Parent = player.PlayerGui
 screenGui.Name = "AutoClickerGUI"
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Затемнение фона
-local background = Instance.new("Frame")
-background.Parent = screenGui
-background.Size = UDim2.new(1, 0, 1, 0)
-background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-background.BackgroundTransparency = 0.5
-background.Active = true
-
--- Основное окно
+-- Основное окно (без затемнения)
 local frame = Instance.new("Frame")
 frame.Parent = screenGui
 frame.Size = UDim2.new(0, 400, 0, 500)
@@ -52,13 +89,26 @@ frame.Position = UDim2.new(0.5, -200, 0.5, -250)
 frame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 frame.BorderSizePixel = 0
 frame.ClipsDescendants = true
-frame.Draggable = true
 frame.Active = true
 
 -- Скругление углов
 local corner = Instance.new("UICorner")
 corner.Parent = frame
 corner.CornerRadius = UDim.new(0, 12)
+
+-- Тень
+local shadow = Instance.new("Frame")
+shadow.Parent = screenGui
+shadow.Size = UDim2.new(0, 400, 0, 500)
+shadow.Position = UDim2.new(0.5, -200, 0.5, -250)
+shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+shadow.BackgroundTransparency = 0.5
+shadow.BorderSizePixel = 0
+shadow.ZIndex = 0
+
+local shadowCorner = Instance.new("UICorner")
+shadowCorner.Parent = shadow
+shadowCorner.CornerRadius = UDim.new(0, 12)
 
 -- Заголовок
 local header = Instance.new("Frame")
@@ -67,6 +117,7 @@ header.Size = UDim2.new(1, 0, 0, 45)
 header.Position = UDim2.new(0, 0, 0, 0)
 header.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
 header.BorderSizePixel = 0
+header.ZIndex = 2
 
 local headerCorner = Instance.new("UICorner")
 headerCorner.Parent = header
@@ -74,7 +125,7 @@ headerCorner.CornerRadius = UDim.new(0, 12)
 
 local title = Instance.new("TextLabel")
 title.Parent = header
-title.Size = UDim2.new(1, -50, 1, 0)
+title.Size = UDim2.new(1, -100, 1, 0)
 title.Position = UDim2.new(0, 15, 0, 0)
 title.BackgroundTransparency = 1
 title.Text = "⚡ Auto Clicker 4.0"
@@ -82,6 +133,48 @@ title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 18
 title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 2
+
+-- Кнопка свернуть
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Parent = header
+minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+minimizeBtn.Position = UDim2.new(1, -80, 0, 7)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+minimizeBtn.BackgroundTransparency = 0.8
+minimizeBtn.Text = "−"
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.TextSize = 20
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.ZIndex = 2
+
+local minCorner = Instance.new("UICorner")
+minCorner.Parent = minimizeBtn
+minCorner.CornerRadius = UDim.new(1, 0)
+
+minimizeBtn.MouseEnter:Connect(function()
+    TweenService:Create(minimizeBtn, TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
+end)
+
+minimizeBtn.MouseLeave:Connect(function()
+    TweenService:Create(minimizeBtn, TweenInfo.new(0.2), {BackgroundTransparency = 0.8}):Play()
+end)
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        minimizeBtn.Text = "+"
+        TweenService:Create(frame, TweenInfo.new(0.3), {Size = UDim2.new(0, 400, 0, 45)}):Play()
+        TweenService:Create(shadow, TweenInfo.new(0.3), {Size = UDim2.new(0, 400, 0, 45)}):Play()
+        content.Visible = false
+    else
+        minimizeBtn.Text = "−"
+        TweenService:Create(frame, TweenInfo.new(0.3), {Size = UDim2.new(0, 400, 0, 500)}):Play()
+        TweenService:Create(shadow, TweenInfo.new(0.3), {Size = UDim2.new(0, 400, 0, 500)}):Play()
+        content.Visible = true
+    end
+end)
 
 -- Кнопка закрытия
 local closeBtn = Instance.new("TextButton")
@@ -95,6 +188,7 @@ closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.TextSize = 18
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.BorderSizePixel = 0
+closeBtn.ZIndex = 2
 
 local closeCorner = Instance.new("UICorner")
 closeCorner.Parent = closeBtn
@@ -122,6 +216,7 @@ content.BackgroundTransparency = 1
 content.CanvasSize = UDim2.new(0, 0, 0, 500)
 content.ScrollBarThickness = 4
 content.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 80)
+content.Visible = true
 
 -- === ФУНКЦИЯ СОЗДАНИЯ ЭЛЕМЕНТОВ ===
 local function createLabel(text, x, y, w, h, color)
@@ -378,8 +473,6 @@ pickBtn.MouseButton1Click:Connect(function()
     settings.customY = mouse.Y
     xBox.Text = tostring(mouse.X)
     yBox.Text = tostring(mouse.Y)
-    pickPos.Text = "Pick location ✓"
-    -- Активируем Pick location
     for _, v in pairs(content:GetChildren()) do
         if v:IsA("TextButton") and v.Name == "Radio_cursor" then
             local c = v:FindFirstChildWhichIsA("Frame")
@@ -470,7 +563,7 @@ end
 -- === ОБНОВЛЕНИЕ CANVAS ===
 content.CanvasSize = UDim2.new(0, 0, 0, yOffset + 70)
 
--- === ЛОГИКА КЛИКЕРА ===
+-- === ЛОГИКА КЛИКЕРА (С ПРОВЕРКОЙ) ===
 local function performClick()
     local x, y
     if settings.cursorMode == "Pick" then
@@ -481,28 +574,24 @@ local function performClick()
         y = mouse.Y
     end
     
-    local button = Enum.UserInputType.MouseButton1
-    if settings.clickButton == "Right" then
-        button = Enum.UserInputType.MouseButton2
-    elseif settings.clickButton == "Middle" then
-        button = Enum.UserInputType.MouseButton3
-    end
+    local button = settings.clickButton
     
-    -- Отправка клика
-    VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, button, 0)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, button, 0)
+    -- Пробуем разные методы клика
+    local clicked = doClick(x, y, button)
+    
+    if not clicked then
+        warn("Не удалось выполнить клик! Попробуйте другой экзекьютор.")
+        return false
+    end
     
     if settings.clickType == "Double" then
         task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, button, 0)
-        task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, button, 0)
+        doClick(x, y, button)
     end
     
-    -- Обновление счетчика
     clickCount = clickCount + 1
     updateCounter(clickCount)
+    return true
 end
 
 local function clickLoop()
@@ -512,7 +601,7 @@ local function clickLoop()
     local offset = (math.random() * settings.randomOffset * 2 - settings.randomOffset) / 1000
     delay = math.max(0.001, delay + offset)
     
-    performClick()
+    local success = performClick()
     
     if settings.repeatMode == "Count" then
         if clickCount >= settings.repeatCount then
@@ -534,12 +623,6 @@ function startClicker()
         clickCount = 0
     end
     updateStatus(true)
-    
-    if settings.cursorMode == "Pick" then
-        mouse.X = settings.customX
-        mouse.Y = settings.customY
-    end
-    
     print("⚡ Автокликер запущен!")
     clickLoop()
 end
@@ -595,10 +678,17 @@ UserInputService.InputChanged:Connect(function(input)
             dragStartPos.Y.Scale,
             dragStartPos.Y.Offset + delta.Y
         )
+        shadow.Position = frame.Position
     end
+end)
+
+-- Обновление тени при перемещении
+frame:GetPropertyChangedSignal("Position"):Connect(function()
+    shadow.Position = frame.Position
 end)
 
 updateStatus(false)
 updateCounter(0)
 print("⚡ Auto Clicker 4.0 загружен! Нажмите F6 для старта/остановки.")
 print("📌 Перетащите окно за заголовок, чтобы переместить.")
+print("🔄 Кнопка − свернуть окно.")
